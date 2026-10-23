@@ -6,21 +6,21 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from langgraph.types import interrupt
+from langgraph.checkpoint.memory import MemorySaver
 
 from agent.state import ResumeState
 from agent.prompts import ATS_EVAL_PROMPT, RESUME_OPTIMIZE_PROMPT
 
 load_dotenv()
 
-# Initialize Groq LLM (using llama-3.3-70b-versatile, which is fast and free-tier friendly on Groq)
+# Groq LLM setup
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
+    model="openai/gpt-oss-120b",
     temperature=0.4,
-    api_key=os.getenv("GROQ_API_KEY")
+    groq_api_key=os.getenv("GROQ_API_KEY")
 )
 
 def evaluate_resume(state: ResumeState):
-    """Node 1: Evaluates ATS score, missing keywords, and mistakes."""
     prompt = ATS_EVAL_PROMPT.format(
         job_description=state["job_description"],
         resume_text=state["resume_text"]
@@ -29,7 +29,6 @@ def evaluate_resume(state: ResumeState):
     response = llm.invoke(prompt)
     content = response.content.strip()
     
-    # Clean up potential markdown formatting in JSON response
     if content.startswith("```json"):
         content = content[7:-3].strip()
     elif content.startswith("```"):
@@ -53,8 +52,6 @@ def evaluate_resume(state: ResumeState):
     }
 
 def optimize_resume(state: ResumeState):
-    """Node 2: Rewrites the resume text and code to achieve a 100/100 ATS score."""
-    # Gather feedback history if any
     history = state.get("feedback_history", [])
     latest_feedback = history[-1] if history else "None provided yet. Make it a 100/100 ATS-optimized resume."
     
@@ -89,8 +86,6 @@ def optimize_resume(state: ResumeState):
     }
 
 def human_feedback_node(state: ResumeState):
-    """Node 3: Human-in-the-loop interruption point."""
-    # LangGraph interrupt pauses graph execution and waits for human input
     human_response = interrupt({
         "question": "Are you satisfied with this optimized resume version, or would you like further changes?",
         "ats_score": state["ats_score"],
@@ -98,12 +93,11 @@ def human_feedback_node(state: ResumeState):
         "optimized_resume_code": state.get("optimized_resume_code")
     })
     
-    # human_response can be a dict or string containing feedback / satisfaction status
     if isinstance(human_response, dict):
         satisfied = human_response.get("satisfied", False)
         feedback = human_response.get("feedback", "")
     else:
-        satisfied = True if str(human_response).lower() in ["yes", "satisfy", "done", "ok"] else False
+        satisfied = True if str(human_response).lower() in ["yes", "satisfy", "done"] else False
         feedback = str(human_response)
         
     history = state.get("feedback_history", [])
@@ -116,12 +110,11 @@ def human_feedback_node(state: ResumeState):
     }
 
 def should_continue(state: ResumeState) -> Literal["optimize", "__end__"]:
-    """Conditional routing based on whether the human is satisfied."""
     if state.get("human_satisfied", False) or state.get("ats_score", 0) >= 98:
         return "__end__"
     return "optimize"
 
-# Build the Graph
+# Workflow setup
 workflow = StateGraph(ResumeState)
 
 workflow.add_node("evaluate", evaluate_resume)
@@ -135,9 +128,11 @@ workflow.add_conditional_edges(
     "human_feedback",
     should_continue,
     {
-        "optimize": "evaluate", # Loop back to re-evaluate after changes
+        "optimize": "evaluate",
         "__end__": END
     }
 )
 
-app_graph = workflow.compile()
+# Compile graph with MemorySaver checkpointer
+checkpointer = MemorySaver()
+app_graph = workflow.compile(checkpointer=checkpointer)
