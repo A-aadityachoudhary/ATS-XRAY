@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Aaditya Choudhary", email = "aadityach812@gmail.com" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.161.1",
     "jinja2>=3.1.6",
