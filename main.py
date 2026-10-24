@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import shutil
 from typing import Optional
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
@@ -16,9 +17,13 @@ load_dotenv()
 
 app = FastAPI(title="ATS X-Ray Resume Optimizer", version="1.0.0")
 
-# Mount static files and templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+BASE_DIR = Path(__file__).resolve().parent
+
+# Mount static files and templates relative to BASE_DIR
+if os.path.exists(BASE_DIR / "static"):
+    app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # In-memory session store for demo graph states & thread configs
 # (For production scaling, you can use LangGraph MemorySaver with Postgres/Redis)
